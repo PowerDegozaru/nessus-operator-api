@@ -4,7 +4,7 @@ Simple RESTful Nessus API that makes use of browser-use for any requests that ca
 If there is a need to call the Nessus APIs, all headers will be forwarded (which includes session token / API keys useful for authentication).
 """
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from pydantic import BaseModel
 from pathlib import Path
 import tomllib
@@ -23,11 +23,13 @@ with open(CONFIG_PATH, "rb") as f:
     conf = tomllib.load(f)
 
 NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
-NESSUS_USERNAME = conf["nessus"]["username"]
-NESSUS_PASSWORD = conf["nessus"]["password"]
+NESSUS_ACCESS_KEY = conf["nessus"]["access_key"]
+NESSUS_SECRET_KEY = conf["nessus"]["secret_key"]
 
 DEV_MODE = conf["app"]["is_dev_mode"]
 SSL_VERIFY = not DEV_MODE
+
+NESSUS_AUTH_HEADER = {"X-ApiKeys": f"accessKey={NESSUS_ACCESS_KEY}; secretKey={NESSUS_SECRET_KEY};"}
 
 # Logging
 if sys.platform.startswith("win"):
@@ -41,6 +43,17 @@ logging.info("Loop policy is %s, loop class is %s",
 
 # In-memory storage for scan state/logs (swap for Redis/db in production)
 scan_store: dict[str, dict[str, str]] = {}
+
+def nessus_auth_header_fallback(headers):
+    """Checks if the headers provided contains authentication information,
+    else fallback to the default API keys provided in the config file"""
+    keys_lowered = [key.lower() for key in headers]
+    if "x-apikeys" in keys_lowered or "x-cookie" in keys_lowered:
+        return headers
+
+    headers_dict = dict(headers)
+    headers_dict.update(NESSUS_AUTH_HEADER)
+    return headers_dict
 
 
 #--------------------------------------------------
@@ -94,12 +107,12 @@ class ScanTemplate(BaseModel):
     title: str
     uuid: str
     desc: str
-    
+
 @app.get("/list_scan_templates")
 def list_scan_templates(req: Request) -> list[ScanTemplate]:
     res = []
 
-    r = requests.get(NESSUS_URL + "/editor/scan/templates", headers=req.headers, verify=SSL_VERIFY)
+    r = requests.get(NESSUS_URL + "/editor/scan/templates", headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
     r_json = r.json()
 
     raw_templates = r_json["templates"]
@@ -128,7 +141,8 @@ def list_scans(req: Request, folder_id: int | None = None) -> list[ListScansItem
     params = {}
     if folder_id is not None:
         params["folder_id"] = folder_id
-    r = requests.get(NESSUS_URL + "/scans", params=params, headers=req.headers, verify=SSL_VERIFY)
+    r = requests.get(NESSUS_URL + "/scans", params=params, headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
+    print(r.json())
     r_json = r.json()
 
     raw_scans = r_json["scans"]
@@ -160,7 +174,7 @@ class ScanStatus(BaseModel):
 
 @app.get("/scan_status")
 def get_scan_status(req: Request, scan_id: int) -> ScanStatus:
-    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=req.headers, verify=SSL_VERIFY)
+    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
     r_json = r.json()
 
     info = r_json["info"]
@@ -201,7 +215,7 @@ class ScanResult(BaseModel):
 
 @app.get("/scan_results")
 def get_scan_results(req: Request, scan_id: int):
-    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=req.headers, verify=SSL_VERIFY)
+    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
     r_json = r.json()
 
     raw_vulnerabilities = r_json["vulnerabilities"]
