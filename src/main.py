@@ -69,7 +69,7 @@ class StartScanResponse(BaseModel):
     scan_id: str
     scan_name: str
 
-@app.post("/scan/start")
+@app.post("/start_scan")
 async def start_scan(body: StartScanRequest) -> StartScanResponse:
     scan_name = utils.build_scan_name(body.scan_name_prefix)
     scan_id = utils.generate_uuid()
