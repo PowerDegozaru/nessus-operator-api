@@ -6,6 +6,7 @@ If there is a need to call the Nessus APIs, all headers will be forwarded (which
 
 from fastapi import FastAPI, Request, HTTPException
 from pydantic import BaseModel
+from pathlib import Path
 import tomllib
 import requests
 import logging
@@ -17,7 +18,7 @@ import utils
 
 app = FastAPI()
 
-CONFIG_PATH = "config.toml"
+CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
 with open(CONFIG_PATH, "rb") as f:
     conf = tomllib.load(f)
 

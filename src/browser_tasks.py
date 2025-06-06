@@ -1,9 +1,10 @@
-import os
-import tomllib
 from langchain_google_genai import ChatGoogleGenerativeAI
 from browser_use import Agent
+from pathlib import Path
+import os
+import tomllib
 
-CONFIG_PATH = "config.toml"
+CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
 with open(CONFIG_PATH, "rb") as f:
     conf = tomllib.load(f)
 
