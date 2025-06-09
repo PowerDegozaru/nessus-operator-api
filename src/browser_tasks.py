@@ -4,6 +4,8 @@ from pathlib import Path
 import os
 import tomllib
 
+from models import Folder
+
 CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
 with open(CONFIG_PATH, "rb") as f:
     conf = tomllib.load(f)
@@ -17,7 +19,7 @@ LLM_MODEL = conf["llm"]["model"]
 os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY   # langchain_google_genai uses this
 
 
-def build_scan_prompt(target: str, scan_name: str, scan_type: str) -> str:
+def build_scan_prompt(target: str, scan_name: str, scan_type: str, folder: Folder) -> str:
     return f"""
 ──────────────────────────────────────────────────────────────────────────────
 Nessus Essentials one-off “{scan_type}”
@@ -27,10 +29,9 @@ Login (if asked) … Username {NESSUS_USERNAME} Password {NESSUS_PASSWORD}
 Target ………… {target}
 ──────────────────────────────────────────────────────────────────────────────
 
-1. Open “Scans” ▸ “My Scans”
-   • URL must end with **/#/scans/folders/my-scans**
-   • Page <h1> must read **My Scans**
-   • If either check fails, reload that URL.
+1. Open Scan Folder with the name: “{folder.name}”
+   • URL must end with **/#/scans/folders/{folder.id}**
+   • If check fails, reload that URL.
 
 2. Bring up the template gallery
    • Click the **New Scan** control (id =`new-scan`, text “New Scan”, “＋” icon)
@@ -45,12 +46,12 @@ Target ………… {target}
    • Leave everything else at default.
 
 5. **Save** and wait until the scans table returns.
-   • Confirm you are back on **My Scans**.
+   • Confirm you are back on the folder's page (folder name: **{folder.name}**).
 
 6. The new scan should be the first row (sorted by **Last Modified**).
 
 7. Hover that row (or open its “•••” menu) → **Launch** (▶).
-   • Make sure the **Status** column changes to **Running**.
+   • Make sure the **Status** column changes to **Running** or **Completed**.
 
 8. Task complete.
 
@@ -61,14 +62,15 @@ Constraints:
 • Each scan name must be unique (timestamped).
 """
 
-async def scan_operator_run(target: str, scan_type: str, scan_name: str) -> str:
+async def scan_operator_run(target: str, scan_type: str, scan_name: str, folder: Folder) -> str:
     """Start operator to run the specified scan
 
     Returns:
         Logs (browser-use repr of AgentHistoryList)
     """
     llm = ChatGoogleGenerativeAI(model=LLM_MODEL)
-    prompt = build_scan_prompt(target, scan_name, scan_type)
+    prompt = build_scan_prompt(target, scan_name, scan_type, folder)
     agent = Agent(task=prompt, llm=llm, enable_memory=False)
     agent_history = await agent.run()
     return repr(agent_history)
+

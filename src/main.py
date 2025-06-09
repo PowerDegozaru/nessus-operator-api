@@ -1,11 +1,13 @@
 """
 Simple RESTful Nessus API that makes use of browser-use for any requests that cannot be forwarded to API calls in Nessus Essentials.
 
-If there is a need to call the Nessus APIs, all headers will be forwarded (which includes session token / API keys useful for authentication).
+If there is a need to call the Nessus APIs, authentication headers will be forwarded (session token / API keys useful for authentication),
+if none exists, defaults will be used from the config.toml file.
+
+The functions here should be purely API Endpoints, service logic should be in service.py
 """
 
-from fastapi import FastAPI, Request, HTTPException, Header
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, Response, HTTPException
 from pathlib import Path
 import tomllib
 import requests
@@ -15,6 +17,20 @@ import asyncio
 
 import browser_tasks
 import utils
+import service
+from models import (
+    GetSessionTokenRequest,
+    Folder,
+    CreateFolderRequest,
+    StartScanRequest,
+    StartScanResponse,
+    ScanTemplate,
+    ListScansItem,
+    ScanStatus,
+    Vulnerability,
+    ScanResultHost,
+    ScanResult,
+)
 
 app = FastAPI()
 
@@ -23,13 +39,9 @@ with open(CONFIG_PATH, "rb") as f:
     conf = tomllib.load(f)
 
 NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
-NESSUS_ACCESS_KEY = conf["nessus"]["access_key"]
-NESSUS_SECRET_KEY = conf["nessus"]["secret_key"]
 
 DEV_MODE = conf["app"]["is_dev_mode"]
 SSL_VERIFY = not DEV_MODE
-
-NESSUS_AUTH_HEADER = {"X-ApiKeys": f"accessKey={NESSUS_ACCESS_KEY}; secretKey={NESSUS_SECRET_KEY};"}
 
 # Logging
 if sys.platform.startswith("win"):
@@ -41,25 +53,6 @@ logging.info("Loop policy is %s, loop class is %s",
              asyncio.get_event_loop_policy().__class__.__name__,
              type(asyncio.get_event_loop()).__name__)      # should say ProactorEventLoop
 
-# In-memory storage for scan state/logs (swap for Redis/db in production)
-scan_store: dict[str, dict[str, str]] = {}
-
-def nessus_auth_header_fallback(headers):
-    """Checks if the headers provided contains authentication information,
-    else fallback to the default API keys provided in the config file"""
-    keys_lowered = [key.lower() for key in headers]
-    if "x-apikeys" in keys_lowered or "x-cookie" in keys_lowered:
-        return headers
-
-    headers_dict = dict(headers)
-    headers_dict.update(NESSUS_AUTH_HEADER)
-    return headers_dict
-
-
-#--------------------------------------------------
-class GetSessionTokenRequest(BaseModel):
-    username: str
-    password: str
 
 @app.post("/session")
 def get_session_token(body:GetSessionTokenRequest) -> str:
@@ -71,161 +64,114 @@ def get_session_token(body:GetSessionTokenRequest) -> str:
     return r.json()["token"]
 
 
-#--------------------------------------------------
-class StartScanRequest(BaseModel):
-    target: str
-    scan_type: str = "Basic Network Scan"
-    scan_name_prefix: str = "Test"
+@app.get("/folders")
+def list_folders(req: Request) -> list[Folder]:
+    return service.list_folders(auth_headers=utils.nessus_auth_header(req.headers))
 
-class StartScanResponse(BaseModel):
-    ok: bool
-    scan_id: str
-    scan_name: str
+
+@app.get("/folders/getid")
+def get_folder_id(req: Request, name: str, create_if_not_exists: bool = False) -> int:
+    """API Endpoint: Returns the folder IDs of the folder with the given name (case insensitive), 404 if not found """
+    return service.get_folder_id(name=name,
+                                 create_if_not_exists=create_if_not_exists,
+                                 auth_headers=utils.nessus_auth_header(req.headers))
+
+
+@app.post("/folders")
+def create_folder(req: Request, body: CreateFolderRequest) -> Response:
+    return service.create_folder(name=body.name,
+                                 auth_headers=utils.nessus_auth_header(req.headers))
+
 
 @app.post("/start_scan")
-async def start_scan(body: StartScanRequest) -> StartScanResponse:
-    scan_name = utils.build_scan_name(body.scan_name_prefix)
-    scan_id = utils.generate_uuid()
+#async def start_scan(body: StartScanRequest, req: Request) -> StartScanResponse:
+async def start_scan(body: StartScanRequest, req: Request):
+    folder_name = "nessus-controller"   # Custom folder to store scans creates by our Nessus Controller
+    folder_id = service.get_folder_id(name=folder_name,         # Also creates if doesn't exists
+                                      create_if_not_exists=True,
+                                      auth_headers=utils.nessus_auth_header(req.headers))
+    folder = service.get_folder(folder_id=folder_id, auth_headers=utils.nessus_auth_header(req.headers))
+    unique_scan_name = utils.build_scan_name(body.scan_name_prefix)
+
     try:
-        log = await browser_tasks.scan_operator_run(body.target, body.scan_type, scan_name)
-    except Exception as exc:
+        log = await browser_tasks.scan_operator_run(body.target, body.scan_type, unique_scan_name, folder)
+    except Exception as e:
         logging.exception("Scan failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(e))
 
-    scan_store[scan_id] = {
-        "scan_name": scan_name,
-        "target": body.target,
-        "scan_type": body.scan_type,
-        "status": "complete",
-        "log": log
-    }
-    return StartScanResponse(ok=True, scan_id=scan_id, scan_name=scan_name)
+    # Try to get Scan ID by listing all scans
+    scan_ids = service.get_scan_id(name=unique_scan_name,
+                                   folder_id=folder_id,
+                                   auth_headers=utils.nessus_auth_header(req.headers))
 
+    if len(scan_ids) > 1:
+        msg = "Internal Error: Scan ID Not Unique!"
+        logging.exception(msg)
+        raise HTTPException(status_code=500, detail=msg)
+    elif len(scan_ids) != 1:
+        msg = "Internal Error: Scan ID Not Found, Scan was possibly not initiated properly by Operator"
+        logging.exception(msg)
+        raise HTTPException(status_code=500, detail= msg)
 
-#--------------------------------------------------
-class ScanTemplate(BaseModel):
-    title: str
-    uuid: str
-    desc: str
+    scan_id = scan_ids[0]
+
+    return StartScanResponse(ok=True, scan_id=scan_id, scan_name=unique_scan_name)
+
 
 @app.get("/list_scan_templates")
 def list_scan_templates(req: Request) -> list[ScanTemplate]:
     res = []
 
-    r = requests.get(NESSUS_URL + "/editor/scan/templates", headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
+    r = requests.get(NESSUS_URL + "/editor/scan/templates", headers=utils.nessus_auth_header(req.headers), verify=SSL_VERIFY)
     r_json = r.json()
 
     raw_templates = r_json["templates"]
     for raw_template in raw_templates:
         res.append(ScanTemplate(
-            title = raw_template["title"],
-            uuid = raw_template["uuid"],
-            desc = raw_template["desc"],
+            title=raw_template["title"],
+            uuid=raw_template["uuid"],
+            desc=raw_template["desc"],
             )
         )
     return res
 
-
-#--------------------------------------------------
-class ListScansItem(BaseModel):
-    uuid: str
-    name: str
-    id: int
-    scan_type: str
-    folder_id: int
-    status: str
-    creation_date: int
 
 @app.get("/list_scans")
 def list_scans(req: Request, folder_id: int | None = None) -> list[ListScansItem]:
-    params = {}
-    if folder_id is not None:
-        params["folder_id"] = folder_id
-    r = requests.get(NESSUS_URL + "/scans", params=params, headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
-    print(r.json())
-    r_json = r.json()
+    return service.list_scans(auth_headers=utils.nessus_auth_header(req.headers), folder_id=folder_id)
 
-    raw_scans = r_json["scans"]
-    res = []
-
-    for raw_scan in raw_scans:
-        res.append(ListScansItem(
-            name = raw_scan["name"],
-            scan_type = raw_scan["scan_type"],
-            id = raw_scan["id"],
-            folder_id = raw_scan["folder_id"],
-            status = raw_scan["status"],
-            uuid = raw_scan["uuid"],
-            creation_date = raw_scan["creation_date"],
-            )
-        )
-    return res
-
-
-#--------------------------------------------------
-class ScanStatus(BaseModel):
-    name: str
-    status: str
-    targets: str
-    policy: str
-    policy_template_uuid: str
-    folder_id: int
-    timestamp: int
 
 @app.get("/scan_status")
 def get_scan_status(req: Request, scan_id: int) -> ScanStatus:
-    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
+    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=SSL_VERIFY)
     r_json = r.json()
 
     info = r_json["info"]
 
     return ScanStatus(
-        name = info["name"],
-        status = info["status"],
-        targets = info["targets"],
-        policy = info["policy"],
+        name=info["name"],
+        status=info["status"],
+        targets=info["targets"],
+        policy=info["policy"],
         policy_template_uuid= info["policy_template_uuid"],
-        folder_id = info["folder_id"],
-        timestamp = info["timestamp"],
+        folder_id=info["folder_id"],
+        timestamp=info["timestamp"],
     )
 
 
-#--------------------------------------------------
-class Vulnerability(BaseModel):
-    count: int
-    plugin_name: str
-    severity: int
-    plugin_family: str
-
-class ScanResultHost(BaseModel):
-    totalchecksconsidered: int
-    numchecksconsidered: int
-    host_id: int
-    hostname: str
-    score: int
-    critical: int
-    high: int
-    medium: int
-    low: int
-    info: int
-
-class ScanResult(BaseModel):
-    hosts: list[ScanResultHost]
-    vulnerabilities: list[Vulnerability]
-
 @app.get("/scan_results")
 def get_scan_results(req: Request, scan_id: int):
-    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=nessus_auth_header_fallback(req.headers), verify=SSL_VERIFY)
+    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=SSL_VERIFY)
     r_json = r.json()
 
     raw_vulnerabilities = r_json["vulnerabilities"]
     vulnerabilities = []
     for raw_vulnerability in raw_vulnerabilities:
         vulnerabilities.append(Vulnerability(
-            count = raw_vulnerability["count"],
-            plugin_name = raw_vulnerability["plugin_name"],
-            severity = raw_vulnerability["severity"],
-            plugin_family = raw_vulnerability["plugin_family"],
+            count=raw_vulnerability["count"],
+            plugin_name=raw_vulnerability["plugin_name"],
+            severity=raw_vulnerability["severity"],
+            plugin_family=raw_vulnerability["plugin_family"],
             )
         )
 
@@ -233,20 +179,21 @@ def get_scan_results(req: Request, scan_id: int):
     hosts = []
     for raw_host in raw_hosts:
         hosts.append(ScanResultHost(
-            totalchecksconsidered = raw_host["totalchecksconsidered"],
-            numchecksconsidered = raw_host["numchecksconsidered"],
-            host_id = raw_host["host_id"],
-            hostname = raw_host["hostname"],
-            score = raw_host["score"],
-            critical = raw_host["critical"],
-            high = raw_host["high"],
-            medium = raw_host["medium"],
-            low = raw_host["low"],
-            info = raw_host["info"],
+            totalchecksconsidered=raw_host["totalchecksconsidered"],
+            numchecksconsidered=raw_host["numchecksconsidered"],
+            host_id=raw_host["host_id"],
+            hostname=raw_host["hostname"],
+            score=raw_host["score"],
+            critical=raw_host["critical"],
+            high=raw_host["high"],
+            medium=raw_host["medium"],
+            low=raw_host["low"],
+            info=raw_host["info"],
             )
         )
     
     return ScanResult(
-        hosts = hosts,
-        vulnerabilities = vulnerabilities,
+        hosts=hosts,
+        vulnerabilities=vulnerabilities,
     )
+
