@@ -30,6 +30,7 @@ from models import (
     Vulnerability,
     ScanResultHost,
     ScanResult,
+    ExportFormat,
 )
 
 app = FastAPI()
@@ -197,3 +198,11 @@ def get_scan_results(req: Request, scan_id: int):
         vulnerabilities=vulnerabilities,
     )
 
+
+@app.get("/scan_report")
+def get_scan_report_url(req: Request, scan_id: int, format = ExportFormat.pdf) -> str:
+    return service.get_scan_report_url(
+            scan_id=scan_id,
+            format=format,
+            auth_headers=utils.nessus_auth_header(req.headers),
+    )

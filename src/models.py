@@ -1,3 +1,4 @@
+from enum import StrEnum
 from pydantic import BaseModel
 
 class GetSessionTokenRequest(BaseModel):
@@ -31,7 +32,7 @@ class ScanTemplate(BaseModel):
     desc: str
 
 class ListScansItem(BaseModel):
-    uuid: str
+    uuid: str | None
     name: str
     id: int
     scan_type: str
@@ -69,4 +70,8 @@ class ScanResultHost(BaseModel):
 class ScanResult(BaseModel):
     hosts: list[ScanResultHost]
     vulnerabilities: list[Vulnerability]
+
+class ExportFormat(StrEnum):
+    pdf = "pdf"
+    html = "html"
 

@@ -46,14 +46,18 @@ Target ………… {target}
    • Leave everything else at default.
 
 5. **Save** and wait until the scans table returns.
-   • Confirm you are back on the folder's page (folder name: **{folder.name}**).
 
-6. The new scan should be the first row (sorted by **Last Modified**).
+6. Confirm you are back on the folder's page (folder name: **{folder.name}**).
+   • If not, navigate to URL ending with **/#/scans/folders/{folder.id}**
 
-7. Hover that row (or open its “•••” menu) → **Launch** (▶).
-   • Make sure the **Status** column changes to **Running** or **Completed**.
+7. Click on the **Launch** icon (▶) on the new scan (named: {scan_name})
+   • Sort by “Name” in Descending order if you cannot find the scan
 
-8. Task complete.
+8. Click into the the new scan which is now on top of the page (named: {scan_name})
+   • Make sure the top of the page says **{scan_name}** exactly, otherwise go back and click into the right scan
+   • Make sure the **Status** column is **Running** or **Completed**.
+
+9. Task complete.
 
 Constraints:
 • Do **not** touch any advanced settings unless told.
