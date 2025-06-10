@@ -89,7 +89,8 @@ def list_scans(auth_headers, folder_id: int | None = None) -> list[ListScansItem
     r = requests.get(NESSUS_URL + "/scans", params=params, headers=auth_headers, verify=SSL_VERIFY)
     r_json = r.json()
 
-    raw_scans = r_json["scans"]
+    if r.status_code != 200 :raise HTTPException(r.status_code, r.text)
+    raw_scans = r_json.get("scans") or []   # tolerate “null”
     res = []
 
     for raw_scan in raw_scans:
