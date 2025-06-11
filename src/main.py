@@ -6,14 +6,18 @@ if none exists, defaults will be used from the config.toml file.
 
 The functions here should be purely API Endpoints, service logic should be in service.py
 """
+import sys, asyncio
 
+if sys.platform.startswith("win"):
+    # Playwright & other libs need selector-based loops for subprocesses
+    if isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+import logging
 from fastapi import FastAPI, Request, Response, HTTPException
 from pathlib import Path
 import tomllib
 import requests
-import logging
-import sys
-import asyncio
 
 import browser_tasks
 import utils
@@ -44,10 +48,6 @@ NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
 SSL_VERIFY = conf["dev"]["ssl_verify"]
 
 # Logging
-if sys.platform.startswith("win"):
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    asyncio.set_event_loop(asyncio.new_event_loop())
-
 logging.basicConfig(level=logging.INFO)
 logging.info("Loop policy is %s, loop class is %s",
              asyncio.get_event_loop_policy().__class__.__name__,
