@@ -1,17 +1,8 @@
-from pathlib import Path
-import tomllib
 import datetime as dt
 from shortuuid import uuid
 from http.cookies import SimpleCookie
 
-CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
-with open(CONFIG_PATH, "rb") as f:
-    conf = tomllib.load(f)
-
-NESSUS_ACCESS_KEY = conf["nessus"]["access_key"]
-NESSUS_SECRET_KEY = conf["nessus"]["secret_key"]
-
-NESSUS_AUTH_HEADER = {"X-ApiKeys": f"accessKey={NESSUS_ACCESS_KEY}; secretKey={NESSUS_SECRET_KEY};"}
+import conf
 
 def nessus_auth_header(headers) -> dict:
     """Extracts Nessus authentication headers if present,
@@ -32,7 +23,7 @@ def nessus_auth_header(headers) -> dict:
         if "token" in x_cookie:
             return {"X-Cookie": headers["x-cookie"]}
 
-    return NESSUS_AUTH_HEADER
+    return conf.NESSUS_AUTH_HEADER
 
 def build_scan_name(prefix="") -> str:
     now = dt.datetime.now().astimezone()

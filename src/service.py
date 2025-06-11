@@ -2,27 +2,18 @@
 It is typical for the functions here to call browser-use or the official Nessus API directly"""
 
 import time
-from pathlib import Path
-import tomllib
 import requests
 from fastapi import HTTPException, Response
 
+import conf
 from models import (
     ExportFormat,
     Folder,
     ListScansItem,
 )
 
-CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
-with open(CONFIG_PATH, "rb") as f:
-    conf = tomllib.load(f)
-
-NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
-
-SSL_VERIFY = conf["dev"]["ssl_verify"]
-
 def list_folders(auth_headers) -> list[Folder]:
-    r = requests.get(NESSUS_URL + "/folders", headers=auth_headers, verify=SSL_VERIFY)
+    r = requests.get(conf.NESSUS_URL + "/folders", headers=auth_headers, verify=conf.SSL_VERIFY)
     r_json = r.json()
 
     raw_folders = r_json["folders"]
@@ -30,7 +21,7 @@ def list_folders(auth_headers) -> list[Folder]:
 
 
 def create_folder(name: str, auth_headers) -> Response:
-    r = requests.post(NESSUS_URL + "/folders", json={"name": name}, headers=auth_headers, verify=SSL_VERIFY)
+    r = requests.post(conf.NESSUS_URL + "/folders", json={"name": name}, headers=auth_headers, verify=conf.SSL_VERIFY)
     return Response(
         status_code=r.status_code,
         headers=r.headers,
@@ -87,7 +78,7 @@ def list_scans(auth_headers, folder_id: int | None = None) -> list[ListScansItem
     params = {}
     if folder_id is not None:
         params["folder_id"] = folder_id
-    r = requests.get(NESSUS_URL + "/scans", params=params, headers=auth_headers, verify=SSL_VERIFY)
+    r = requests.get(conf.NESSUS_URL + "/scans", params=params, headers=auth_headers, verify=conf.SSL_VERIFY)
     r_json = r.json()
 
     if r.status_code != 200 :raise HTTPException(r.status_code, r.text)
@@ -118,16 +109,16 @@ def get_scan_report_url(auth_headers, scan_id: int, format: ExportFormat, max_po
     REPORT_TEMPLATE_ID = 167   #TODO: This is the "Detailed Vulnerabilities By Host" Template, the value was reverse engineered
                                #      from the "Generate Report" feature of the website, need to find a better way to list the
                                #      various template IDs and choose from
-    r = requests.post(NESSUS_URL + f"/scans/{scan_id}/export", json={"format": format, "template_id": REPORT_TEMPLATE_ID}, headers=auth_headers, verify=SSL_VERIFY)
+    r = requests.post(conf.NESSUS_URL + f"/scans/{scan_id}/export", json={"format": format, "template_id": REPORT_TEMPLATE_ID}, headers=auth_headers, verify=conf.SSL_VERIFY)
     r.raise_for_status()
 
     token = r.json()["token"]
 
     for _ in range(max_polls):
-        r = requests.get(NESSUS_URL + f"/tokens/{token}/status", headers=auth_headers, verify=SSL_VERIFY)
+        r = requests.get(conf.NESSUS_URL + f"/tokens/{token}/status", headers=auth_headers, verify=conf.SSL_VERIFY)
         r.raise_for_status()
         if r.json()["status"] == "ready":
-            return NESSUS_URL + f"/tokens/{token}/download"
+            return conf.NESSUS_URL + f"/tokens/{token}/download"
         time.sleep(poll_interval_s)
 
     raise Exception(f"Download not ready after polling for {max_polls} (max_polls) with interval {poll_interval_s}s")

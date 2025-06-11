@@ -8,13 +8,12 @@ The functions here should be purely API Endpoints, service logic should be in se
 """
 
 from fastapi import FastAPI, Request, Response, HTTPException
-from pathlib import Path
-import tomllib
 import requests
 import logging
 import sys
 import asyncio
 
+import conf
 import browser_tasks
 import utils
 import service
@@ -35,14 +34,6 @@ from models import (
 
 app = FastAPI()
 
-CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
-with open(CONFIG_PATH, "rb") as f:
-    conf = tomllib.load(f)
-
-NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
-
-SSL_VERIFY = conf["dev"]["ssl_verify"]
-
 # Logging
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -58,7 +49,7 @@ logging.info("Loop policy is %s, loop class is %s",
 def get_session_token(body:GetSessionTokenRequest) -> str:
     """Get session token for authentication to call the other API calls"""
     data = {"username": body.username, "password": body.password}
-    r = requests.post(NESSUS_URL + "/session", json=data, verify=SSL_VERIFY)
+    r = requests.post(conf.NESSUS_URL + "/session", json=data, verify=conf.SSL_VERIFY)
     if r.status_code != 200:
         return r.json()
     return r.json()["token"]
@@ -122,7 +113,7 @@ async def start_scan(body: StartScanRequest, req: Request):
 def list_scan_templates(req: Request) -> list[ScanTemplate]:
     res = []
 
-    r = requests.get(NESSUS_URL + "/editor/scan/templates", headers=utils.nessus_auth_header(req.headers), verify=SSL_VERIFY)
+    r = requests.get(conf.NESSUS_URL + "/editor/scan/templates", headers=utils.nessus_auth_header(req.headers), verify=conf.SSL_VERIFY)
     r_json = r.json()
 
     raw_templates = r_json["templates"]
@@ -143,7 +134,7 @@ def list_scans(req: Request, folder_id: int | None = None) -> list[ListScansItem
 
 @app.get("/scan_status")
 def get_scan_status(req: Request, scan_id: int) -> ScanStatus:
-    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=SSL_VERIFY)
+    r = requests.get(conf.NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=conf.SSL_VERIFY)
     r_json = r.json()
 
     info = r_json["info"]
@@ -161,7 +152,7 @@ def get_scan_status(req: Request, scan_id: int) -> ScanStatus:
 
 @app.get("/scan_results")
 def get_scan_results(req: Request, scan_id: int):
-    r = requests.get(NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=SSL_VERIFY)
+    r = requests.get(conf.NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=conf.SSL_VERIFY)
     r_json = r.json()
 
     raw_vulnerabilities = r_json["vulnerabilities"]

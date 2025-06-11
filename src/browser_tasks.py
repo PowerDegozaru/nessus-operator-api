@@ -1,34 +1,19 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from browser_use import Agent, BrowserProfile, BrowserSession
-from pathlib import Path
 import os
-import tomllib
 
+import conf
 from models import Folder
 
-CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
-with open(CONFIG_PATH, "rb") as f:
-    conf = tomllib.load(f)
-
-IS_HEADLESS = conf["dev"]["headless_operator"]
-SSL_VERIFY = conf["dev"]["ssl_verify"]
-
-NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
-NESSUS_USERNAME = conf["nessus"]["username"]
-NESSUS_PASSWORD = conf["nessus"]["password"]
-
-GOOGLE_API_KEY = conf["llm"]["google_api_key"]
-LLM_MODEL = conf["llm"]["model"]
-os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY   # langchain_google_genai uses this
-
+os.environ["GOOGLE_API_KEY"] = conf.GOOGLE_API_KEY   # langchain_google_genai uses this
 
 def build_scan_prompt(target: str, scan_name: str, scan_type: str, folder: Folder) -> str:
     return f"""
 ──────────────────────────────────────────────────────────────────────────────
 Nessus Essentials one-off “{scan_type}”
 ──────────────────────────────────────────────────────────────────────────────
-Instance URL …… {NESSUS_URL}
-Login (if asked) … Username {NESSUS_USERNAME} Password {NESSUS_PASSWORD}
+Instance URL …… {conf.NESSUS_URL}
+Login (if asked) … Username {conf.NESSUS_USERNAME} Password {conf.NESSUS_PASSWORD}
 Target ………… "{target}"
 ──────────────────────────────────────────────────────────────────────────────
 
@@ -79,14 +64,14 @@ async def scan_operator_run(target: str, scan_type: str, scan_name: str, folder:
     """
     MAX_STEPS = 25
     WIDTH, HEIGHT = 1440, 736   # Tested to work: Smaller the better if it still works
-    llm = ChatGoogleGenerativeAI(model=LLM_MODEL)
+    llm = ChatGoogleGenerativeAI(model=conf.LLM_MODEL)
     prompt = build_scan_prompt(target, scan_name, scan_type, folder)
     browser_profile = BrowserProfile(
-            headless=IS_HEADLESS,
+            headless=conf.IS_HEADLESS,
             viewport={"width": WIDTH, "height": HEIGHT},
             window_size={"width": WIDTH, "height": HEIGHT},
-            ignore_https_errors=(not SSL_VERIFY),
-            allowed_domains=[NESSUS_URL],
+            ignore_https_errors=(not conf.SSL_VERIFY),
+            allowed_domains=[conf.NESSUS_URL],
     )
     browser_session = BrowserSession(browser_profile=browser_profile)
     agent = Agent(task=prompt,
