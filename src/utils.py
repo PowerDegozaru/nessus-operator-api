@@ -1,7 +1,7 @@
 from pathlib import Path
 import tomllib
 import datetime as dt
-import uuid
+from shortuuid import uuid
 from http.cookies import SimpleCookie
 
 CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
@@ -34,9 +34,8 @@ def nessus_auth_header(headers) -> dict:
 
     return NESSUS_AUTH_HEADER
 
-def build_scan_name(prefix: str = "nessus-controller") -> str:
+def build_scan_name(prefix="") -> str:
     now = dt.datetime.now().astimezone()
-    return f"{prefix}-{now:%Y%m%d-%H%M}"
+    unique_suffix = "-" + uuid()
+    return f"{prefix}{now:%y%m%d-%H%M%S{unique_suffix}}"
 
-def generate_uuid() -> str:
-    return str(uuid.uuid4())

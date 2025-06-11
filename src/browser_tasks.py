@@ -1,5 +1,5 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
-from browser_use import Agent
+from browser_use import Agent, BrowserProfile, BrowserSession
 from pathlib import Path
 import os
 import tomllib
@@ -9,6 +9,9 @@ from models import Folder
 CONFIG_PATH = (Path(__file__).parent.parent / "config.toml").resolve()
 with open(CONFIG_PATH, "rb") as f:
     conf = tomllib.load(f)
+
+IS_HEADLESS = conf["dev"]["headless_operator"]
+SSL_VERIFY = conf["dev"]["ssl_verify"]
 
 NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
 NESSUS_USERNAME = conf["nessus"]["username"]
@@ -26,7 +29,7 @@ Nessus Essentials one-off “{scan_type}”
 ──────────────────────────────────────────────────────────────────────────────
 Instance URL …… {NESSUS_URL}
 Login (if asked) … Username {NESSUS_USERNAME} Password {NESSUS_PASSWORD}
-Target ………… {target}
+Target ………… "{target}"
 ──────────────────────────────────────────────────────────────────────────────
 
 1. Open Scan Folder with the name: “{folder.name}”
@@ -53,11 +56,13 @@ Target ………… {target}
 7. Click on the **Launch** icon (▶) on the new scan (named: {scan_name})
    • Sort by “Name” in Descending order if you cannot find the scan
 
-8. Click into the the new scan which is now on top of the page (named: {scan_name})
+8. Click into the the new scan (named: {scan_name})
    • Make sure the top of the page says **{scan_name}** exactly, otherwise go back and click into the right scan
-   • Make sure the **Status** column is **Running** or **Completed**.
 
-9. Task complete.
+9. Make sure the **Status** column is **Running** or **Completed**.
+   • Otherwise, re-attempt to launch the scan once more starting from step 6. again
+
+10. Task complete.
 
 Constraints:
 • Do **not** touch any advanced settings unless told.
@@ -72,9 +77,23 @@ async def scan_operator_run(target: str, scan_type: str, scan_name: str, folder:
     Returns:
         Logs (browser-use repr of AgentHistoryList)
     """
+    MAX_STEPS = 25
+    WIDTH, HEIGHT = 1440, 736   # Tested to work: Smaller the better if it still works
     llm = ChatGoogleGenerativeAI(model=LLM_MODEL)
     prompt = build_scan_prompt(target, scan_name, scan_type, folder)
-    agent = Agent(task=prompt, llm=llm, enable_memory=False)
-    agent_history = await agent.run()
+    browser_profile = BrowserProfile(
+            headless=IS_HEADLESS,
+            viewport={"width": WIDTH, "height": HEIGHT},
+            window_size={"width": WIDTH, "height": HEIGHT},
+            ignore_https_errors=(not SSL_VERIFY),
+            allowed_domains=[NESSUS_URL],
+    )
+    browser_session = BrowserSession(browser_profile=browser_profile)
+    agent = Agent(task=prompt,
+                  llm=llm,
+                  enable_memory=False,
+                  browser_session=browser_session,
+    )
+    agent_history = await agent.run(max_steps=MAX_STEPS)
     return repr(agent_history)
 

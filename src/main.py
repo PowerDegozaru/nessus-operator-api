@@ -41,8 +41,7 @@ with open(CONFIG_PATH, "rb") as f:
 
 NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
 
-DEV_MODE = conf["app"]["is_dev_mode"]
-SSL_VERIFY = not DEV_MODE
+SSL_VERIFY = conf["dev"]["ssl_verify"]
 
 # Logging
 if sys.platform.startswith("win"):

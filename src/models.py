@@ -19,7 +19,7 @@ class CreateFolderRequest(BaseModel):
 class StartScanRequest(BaseModel):
     target: str
     scan_type: str = "Basic Network Scan"
-    scan_name_prefix: str = "nessus-controller"
+    scan_name_prefix: str = ""
 
 class StartScanResponse(BaseModel):
     ok: bool

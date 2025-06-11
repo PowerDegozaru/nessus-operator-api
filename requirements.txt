@@ -107,3 +107,4 @@ uvloop==0.21.0
 watchfiles==1.0.5
 websockets==15.0.1
 zstandard==0.23.0
+shortuuid==1.0.13

@@ -19,8 +19,7 @@ with open(CONFIG_PATH, "rb") as f:
 
 NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
 
-DEV_MODE = conf["app"]["is_dev_mode"]
-SSL_VERIFY = not DEV_MODE
+SSL_VERIFY = conf["dev"]["ssl_verify"]
 
 def list_folders(auth_headers) -> list[Folder]:
     r = requests.get(NESSUS_URL + "/folders", headers=auth_headers, verify=SSL_VERIFY)
@@ -92,8 +91,10 @@ def list_scans(auth_headers, folder_id: int | None = None) -> list[ListScansItem
     r_json = r.json()
 
     raw_scans = r_json["scans"]
-    res = []
+    if raw_scans is None:
+        return []
 
+    res = []
     for raw_scan in raw_scans:
         res.append(ListScansItem(
             name=raw_scan["name"],
@@ -107,11 +108,13 @@ def list_scans(auth_headers, folder_id: int | None = None) -> list[ListScansItem
         )
     return res
 
+
 def get_scan_id(name: str, *, folder_id: int|None = None, auth_headers) -> list[int]:
     """Get Scan ID of scans with the exact same name (optionally in the given folder)"""
     scans = list_scans(folder_id=folder_id, auth_headers=auth_headers)
     filtered_scans = [scan.id for scan in scans if scan.name == name]
     return filtered_scans
+
 
 def get_scan_report_url(auth_headers, scan_id: int, format: ExportFormat, max_polls = 10, poll_interval_s = 1) -> str:
     REPORT_TEMPLATE_ID = 167   #TODO: This is the "Detailed Vulnerabilities By Host" Template, the value was reverse engineered
