@@ -30,6 +30,7 @@ from models import (
     Vulnerability,
     ScanResultHost,
     ScanResult,
+    ExportFormat,
 )
 
 app = FastAPI()
@@ -40,8 +41,7 @@ with open(CONFIG_PATH, "rb") as f:
 
 NESSUS_URL = conf["nessus"]["url"]  # Actual Nessus API URL
 
-DEV_MODE = conf["app"]["is_dev_mode"]
-SSL_VERIFY = not DEV_MODE
+SSL_VERIFY = conf["dev"]["ssl_verify"]
 
 # Logging
 if sys.platform.startswith("win"):
@@ -197,3 +197,11 @@ def get_scan_results(req: Request, scan_id: int):
         vulnerabilities=vulnerabilities,
     )
 
+
+@app.get("/scan_report")
+def get_scan_report_url(req: Request, scan_id: int, format = ExportFormat.pdf) -> str:
+    return service.get_scan_report_url(
+            scan_id=scan_id,
+            format=format,
+            auth_headers=utils.nessus_auth_header(req.headers),
+    )
