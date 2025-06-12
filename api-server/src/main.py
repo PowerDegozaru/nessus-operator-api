@@ -6,16 +6,12 @@ if none exists, defaults will be used from the config.toml file.
 
 The functions here should be purely API Endpoints, service logic should be in service.py
 """
-import sys, asyncio
 
-if sys.platform.startswith("win"):
-    # Playwright & other libs need selector-based loops for subprocesses
-    if isinstance(asyncio.get_event_loop_policy(), asyncio.WindowsProactorEventLoopPolicy):
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-import logging
 from fastapi import FastAPI, Request, Response, HTTPException
 import requests
+import logging
+import sys
+import asyncio
 
 import conf
 import browser_tasks
@@ -39,6 +35,10 @@ from models import (
 app = FastAPI()
 
 # Logging
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 logging.basicConfig(level=logging.INFO)
 logging.info("Loop policy is %s, loop class is %s",
              asyncio.get_event_loop_policy().__class__.__name__,

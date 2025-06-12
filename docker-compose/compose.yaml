@@ -1,0 +1,21 @@
+name: "nessus-compose"
+
+services:
+  api:
+    build: ../api-server/
+    ports:
+      - "8000:8000"   # Uncomment to also expose the nessus API to the host machine
+    volumes:
+      - "./api-server-config.toml:/home/app/config.toml"
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # So that the host's `localhost` can be mapped to `host.docker.internal` in the container
+    security_opt:
+      - "seccomp:./chrome-seccomp.json"     # Required to allow permissions for the creation of chromium sandbox for browser-use
+    restart: unless-stopped
+
+  mcp:
+    build: ../mcp-server/
+    environment:
+      MCP_API_URL: "http://api:8000"
+    stdin_open: true
+    restart: unless-stopped
