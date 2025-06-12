@@ -1,7 +1,20 @@
 # Docker Compose
 This docker compose allows for quick deployment of the Nessus MCP server integrated with the custom API.
 
-`start-mcp-stdio.sh` is the executable to be passed as part of the "command" parameter of the MCP config.
+## Running
+Complete the [Compose Configuration](#config) first.
+
+`start-mcp-stdio.sh` is a convienient executable to be passed as part of the "command" parameter of the MCP config. It is Bash script tested to work on Linux.
+
+Otherwise, we have to manually run
+```sh
+docker compose up -d
+```
+and then pass the following as "command" into the MCP config:
+```sh
+docker attach {name of MCP container}
+```
+where the container name usually defaults to `nessus-compose-mcp-1` (check `docker ps`).
 
 
 ## Config
