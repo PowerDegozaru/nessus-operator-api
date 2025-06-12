@@ -1,5 +1,7 @@
+name: "nessus-compose"
+
 services:
-  nessus-custom-api:
+  api:
     build: ../api-server/
     ports:
       - "8000:8000"   # Uncomment to also expose the nessus API to the host machine
@@ -11,9 +13,9 @@ services:
       - "seccomp:./chrome-seccomp.json"     # Required to allow permissions for the creation of chromium sandbox for browser-use
     restart: unless-stopped
 
-  nessus-custom-mcp:
+  mcp:
     build: ../mcp-server/
     environment:
-      MCP_API_URL: "http://nessus-custom-api:8000"
+      MCP_API_URL: "http://api:8000"
     stdin_open: true
     restart: unless-stopped

@@ -18,7 +18,7 @@ MAX_POLLS=10
 POLL_INTERVAL_S=1
 for (( i=0; i<MAX_POLLS; i++ )); do
     if all_up; then
-        docker compose attach nessus-custom-mcp
+        docker compose attach mcp
 
         # Stop container after attachment terminates
         docker compose stop
