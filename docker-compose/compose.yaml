@@ -1,0 +1,11 @@
+services:
+  nessus-custom-api:
+    build: ../api-server/
+    ports:
+      - "8000:8000"
+    volumes:
+      - "./api-server-config.toml:/home/app/config.toml"
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # So that the host's `localhost` can be mapped to `host.docker.internal` in the container
+    security_opt:
+      - "seccomp:./chrome-seccomp.json"     # Required to allow permissions for the creation of chromium sandbox for browser-use

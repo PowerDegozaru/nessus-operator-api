@@ -1,0 +1,14 @@
+[nessus]
+url = "https://host.docker.internal:8834"
+username = "{NESSUS USERNAME}"
+password = "{NESSUS PASSWORD}"
+access_key = "{NESSUS ACCESS KEY HERE}"
+secret_key = "{NESSUS SECRET KEY HERE}"
+
+[llm]
+google_api_key = "{GOOGLE API KEY}"
+model = "gemini-2.5-pro-preview-05-06"
+
+[dev]
+ssl_verify = false
+headless_operator = true

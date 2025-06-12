@@ -1,2 +1,13 @@
 **/__pycache__/
+
+# api-server specific
 config.toml
+
+# mcp-server specific
+node_modules/
+build/
+
+# docker-compose specific
+api-server-config.toml
+mcp-server.env
+
