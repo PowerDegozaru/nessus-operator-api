@@ -30,26 +30,6 @@ The server provides the following tools:
 - Node.js 16 or higher
 - TypeScript (for development)
 
-### Building from Source
-
-1. Clone the repository:
-
-   ```
-   git clone https://github.com/Cyreslab-AI/nessus-mcp-server.git
-   cd nessus-mcp-server
-   ```
-
-2. Install dependencies:
-
-   ```
-   npm install
-   ```
-
-3. Build the server:
-   ```
-   npm run build
-   ```
-
 ## Usage
 
 ### Running in Mock Mode
@@ -58,49 +38,6 @@ By default, the server runs in mock mode, which doesn't require a Nessus API key
 
 ```
 node build/index.js
-```
-
-### Running with Nessus API
-
-To connect to a real Nessus instance, set the following environment variables:
-
-```
-NESSUS_URL=https://your-nessus-instance:8834
-NESSUS_ACCESS_KEY=your-access-key
-NESSUS_SECRET_KEY=your-secret-key
-```
-
-Then run the server:
-
-```
-node build/index.js
-```
-
-### Using with Claude for Desktop
-
-To use this server with Claude for Desktop:
-
-1. Edit your Claude for Desktop configuration file:
-
-   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-2. Add the server configuration:
-
-```json
-{
-  "mcpServers": {
-    "nessus": {
-      "command": "node",
-      "args": ["/path/to/nessus-mcp-server/build/index.js"],
-      "env": {
-        "NESSUS_URL": "https://your-nessus-instance:8834",
-        "NESSUS_ACCESS_KEY": "your-access-key",
-        "NESSUS_SECRET_KEY": "your-secret-key"
-      }
-    }
-  }
-}
 ```
 
 For mock mode, you can omit the `env` section.
