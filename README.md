@@ -40,18 +40,20 @@ Node MCP Server
 
 The MCP config include something like:
 
-   {
-     "mcpServers": {
-       "nessus": {
-         "command": "node",
-         "args": ["dist/index.js"],
-         "env": {
-           "MCP_API_URL": "http://localhost:8000",
-           "MCP_FORCE_MOCK": "false"
-         },
-         "disabled": false
-       }
-     }
-   }
+{
+  "mcpServers": {
+    "nessus": {
+      "command": "node",
+      "args": [
+        "File path to mcp-server\build\index.js"
+      ],
+      "env": {
+        "MCP_API_URL": "http://localhost:8000",
+        "MCP_FORCE_MOCK": "false"
+      },
+      "disabled": false
+    }
+  }
+}
 
 After setting up and running both, you should be able to use the API server to interact with the MCP server. 
