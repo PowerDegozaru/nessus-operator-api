@@ -1,58 +1,72 @@
-"""
-Simple RESTful Nessus API that makes use of browser-use for any requests that cannot be forwarded to API calls in Nessus Essentials.
+from __future__ import annotations
 
-If there is a need to call the Nessus APIs, authentication headers will be forwarded (session token / API keys useful for authentication),
-if none exists, defaults will be used from the config.toml file.
-
-The functions here should be purely API Endpoints, service logic should be in service.py
-"""
-
-from fastapi import FastAPI, Request, Response, HTTPException
-import requests
+import asyncio
 import logging
 import sys
-import asyncio
+from typing import Any
 
-import conf
+import requests
+from fastapi import FastAPI, HTTPException, Request, Response
+
 import browser_tasks
-import utils
+import conf
 import service
+import utils
 from models import (
-    GetSessionTokenRequest,
-    Folder,
     CreateFolderRequest,
+    ExportFormat,
+    Folder,
+    GetSessionTokenRequest,
+    ListScansItem,
+    ScanResult,
+    ScanResultHost,
+    ScanStatus,
+    ScanTemplate,
     StartScanRequest,
     StartScanResponse,
-    ScanTemplate,
-    ListScansItem,
-    ScanStatus,
     Vulnerability,
-    ScanResultHost,
-    ScanResult,
-    ExportFormat,
 )
 
-app = FastAPI()
+# ——————————————————— logging ———————————————————
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-# Logging
+# Windows event-loop tweak (kept from original code)
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-logging.basicConfig(level=logging.INFO)
-logging.info("Loop policy is %s, loop class is %s",
-             asyncio.get_event_loop_policy().__class__.__name__,
-             type(asyncio.get_event_loop()).__name__)      # should say ProactorEventLoop
+app = FastAPI()
 
 
+# ——————————————————— helper ———————————————————
+def _proxy_request(
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> requests.Response:
+    """Wrapper that adds robust error handling to outbound requests."""
+    try:
+        r = requests.request(method, url, verify=conf.SSL_VERIFY, **kwargs)
+        r.raise_for_status()
+        return r
+    except requests.exceptions.RequestException as exc:
+        logger.exception("Upstream request failure: %s %s", method, url)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+# ——————————————————— endpoints ———————————————————
 @app.post("/session")
-def get_session_token(body:GetSessionTokenRequest) -> str:
-    """Get session token for authentication to call the other API calls"""
-    data = {"username": body.username, "password": body.password}
-    r = requests.post(conf.NESSUS_URL + "/session", json=data, verify=conf.SSL_VERIFY)
-    if r.status_code != 200:
-        return r.json()
-    return r.json()["token"]
+def get_session_token(body: GetSessionTokenRequest) -> str:
+    r = _proxy_request(
+        "POST",
+        conf.NESSUS_URL + "/session",
+        json={"username": body.username, "password": body.password},
+    )
+    return r.json().get("token", "")  # empty string if key missing
 
 
 @app.get("/folders")
@@ -61,138 +75,147 @@ def list_folders(req: Request) -> list[Folder]:
 
 
 @app.get("/folders/getid")
-def get_folder_id(req: Request, name: str, create_if_not_exists: bool = False) -> int:
-    """API Endpoint: Returns the folder IDs of the folder with the given name (case insensitive), 404 if not found """
-    return service.get_folder_id(name=name,
-                                 create_if_not_exists=create_if_not_exists,
-                                 auth_headers=utils.nessus_auth_header(req.headers))
+def get_folder_id(
+    req: Request, name: str, create_if_not_exists: bool = False
+) -> int:
+    return service.get_folder_id(
+        name=name,
+        create_if_not_exists=create_if_not_exists,
+        auth_headers=utils.nessus_auth_header(req.headers),
+    )
 
 
 @app.post("/folders")
 def create_folder(req: Request, body: CreateFolderRequest) -> Response:
-    return service.create_folder(name=body.name,
-                                 auth_headers=utils.nessus_auth_header(req.headers))
+    return service.create_folder(
+        name=body.name, auth_headers=utils.nessus_auth_header(req.headers)
+    )
 
 
 @app.post("/start_scan")
-#async def start_scan(body: StartScanRequest, req: Request) -> StartScanResponse:
-async def start_scan(body: StartScanRequest, req: Request):
-    folder_name = "nessus-controller"   # Custom folder to store scans creates by our Nessus Controller
-    folder_id = service.get_folder_id(name=folder_name,         # Also creates if doesn't exists
-                                      create_if_not_exists=True,
-                                      auth_headers=utils.nessus_auth_header(req.headers))
-    folder = service.get_folder(folder_id=folder_id, auth_headers=utils.nessus_auth_header(req.headers))
+async def start_scan(body: StartScanRequest, req: Request) -> StartScanResponse:
+    folder_name = "nessus-controller"
+    folder_id = service.get_folder_id(
+        name=folder_name,
+        create_if_not_exists=True,
+        auth_headers=utils.nessus_auth_header(req.headers),
+    )
+    folder = service.get_folder(
+        folder_id=folder_id, auth_headers=utils.nessus_auth_header(req.headers)
+    )
     unique_scan_name = utils.build_scan_name(body.scan_name_prefix)
 
     try:
-        log = await browser_tasks.scan_operator_run(body.target, body.scan_type, unique_scan_name, folder)
-    except Exception as e:
-        logging.exception("Scan failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        log = await browser_tasks.scan_operator_run(
+            body.target, body.scan_type, unique_scan_name, folder
+        )
+        logger.debug("Operator log: %s", log)
+    except Exception as exc:
+        logger.exception("Operator run failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # Try to get Scan ID by listing all scans
-    scan_ids = service.get_scan_id(name=unique_scan_name,
-                                   folder_id=folder_id,
-                                   auth_headers=utils.nessus_auth_header(req.headers))
+    scan_ids = service.get_scan_id(
+        name=unique_scan_name,
+        folder_id=folder_id,
+        auth_headers=utils.nessus_auth_header(req.headers),
+    )
 
-    if len(scan_ids) > 1:
-        msg = "Internal Error: Scan ID Not Unique!"
-        logging.exception(msg)
+    if len(scan_ids) != 1:
+        msg = (
+            "Internal Error: scan ID not unique"
+            if len(scan_ids) > 1
+            else "Internal Error: scan ID not found"
+        )
+        logger.error(msg)
         raise HTTPException(status_code=500, detail=msg)
-    elif len(scan_ids) != 1:
-        msg = "Internal Error: Scan ID Not Found, Scan was possibly not initiated properly by Operator"
-        logging.exception(msg)
-        raise HTTPException(status_code=500, detail= msg)
-
-    scan_id = scan_ids[0]
-
-    return StartScanResponse(ok=True, scan_id=scan_id, scan_name=unique_scan_name)
+    return StartScanResponse(ok=True, scan_id=scan_ids[0], scan_name=unique_scan_name)
 
 
 @app.get("/list_scan_templates")
 def list_scan_templates(req: Request) -> list[ScanTemplate]:
-    res = []
-
-    r = requests.get(conf.NESSUS_URL + "/editor/scan/templates", headers=utils.nessus_auth_header(req.headers), verify=conf.SSL_VERIFY)
-    r_json = r.json()
-
-    raw_templates = r_json["templates"]
-    for raw_template in raw_templates:
-        res.append(ScanTemplate(
-            title=raw_template["title"],
-            uuid=raw_template["uuid"],
-            desc=raw_template["desc"],
-            )
+    r = _proxy_request(
+        "GET",
+        conf.NESSUS_URL + "/editor/scan/templates",
+        headers=utils.nessus_auth_header(req.headers),
+    )
+    templates = r.json().get("templates", [])
+    return [
+        ScanTemplate(
+            title=t["title"],
+            uuid=t["uuid"],
+            desc=t.get("desc", ""),
         )
-    return res
+        for t in templates
+    ]
 
 
 @app.get("/list_scans")
 def list_scans(req: Request, folder_id: int | None = None) -> list[ListScansItem]:
-    return service.list_scans(auth_headers=utils.nessus_auth_header(req.headers), folder_id=folder_id)
+    return service.list_scans(
+        auth_headers=utils.nessus_auth_header(req.headers), folder_id=folder_id
+    )
 
 
 @app.get("/scan_status")
 def get_scan_status(req: Request, scan_id: int) -> ScanStatus:
-    r = requests.get(conf.NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=conf.SSL_VERIFY)
-    r_json = r.json()
-
-    info = r_json["info"]
-
+    r = _proxy_request(
+        "GET",
+        conf.NESSUS_URL + f"/scans/{scan_id}",
+        headers=utils.nessus_auth_header(req.headers),
+    )
+    info = r.json().get("info", {})
     return ScanStatus(
-        name=info["name"],
-        status=info["status"],
-        targets=info["targets"],
-        policy=info["policy"],
-        policy_template_uuid= info["policy_template_uuid"],
-        folder_id=info["folder_id"],
-        timestamp=info["timestamp"],
+        name=info.get("name", ""),
+        status=info.get("status", ""),
+        targets=info.get("targets", ""),
+        policy=info.get("policy", ""),
+        policy_template_uuid=info.get("policy_template_uuid", ""),
+        folder_id=info.get("folder_id", 0),
+        timestamp=info.get("timestamp", 0),
     )
 
 
 @app.get("/scan_results")
-def get_scan_results(req: Request, scan_id: int):
-    r = requests.get(conf.NESSUS_URL + f"/scans/{scan_id}", headers=utils.nessus_auth_header(req.headers), verify=conf.SSL_VERIFY)
-    r_json = r.json()
-
-    raw_vulnerabilities = r_json["vulnerabilities"]
-    vulnerabilities = []
-    for raw_vulnerability in raw_vulnerabilities:
-        vulnerabilities.append(Vulnerability(
-            count=raw_vulnerability["count"],
-            plugin_name=raw_vulnerability["plugin_name"],
-            severity=raw_vulnerability["severity"],
-            plugin_family=raw_vulnerability["plugin_family"],
-            )
-        )
-
-    raw_hosts = r_json["hosts"]
-    hosts = []
-    for raw_host in raw_hosts:
-        hosts.append(ScanResultHost(
-            totalchecksconsidered=raw_host["totalchecksconsidered"],
-            numchecksconsidered=raw_host["numchecksconsidered"],
-            host_id=raw_host["host_id"],
-            hostname=raw_host["hostname"],
-            score=raw_host["score"],
-            critical=raw_host["critical"],
-            high=raw_host["high"],
-            medium=raw_host["medium"],
-            low=raw_host["low"],
-            info=raw_host["info"],
-            )
-        )
-    
-    return ScanResult(
-        hosts=hosts,
-        vulnerabilities=vulnerabilities,
+def get_scan_results(req: Request, scan_id: int) -> ScanResult:
+    r = _proxy_request(
+        "GET",
+        conf.NESSUS_URL + f"/scans/{scan_id}",
+        headers=utils.nessus_auth_header(req.headers),
     )
+    data = r.json()
+    vulns = [
+        Vulnerability(
+            count=v["count"],
+            plugin_name=v["plugin_name"],
+            severity=v["severity"],
+            plugin_family=v["plugin_family"],
+        )
+        for v in data.get("vulnerabilities", [])
+    ]
+    hosts = [
+        ScanResultHost(
+            totalchecksconsidered=h["totalchecksconsidered"],
+            numchecksconsidered=h["numchecksconsidered"],
+            host_id=h["host_id"],
+            hostname=h["hostname"],
+            score=h["score"],
+            critical=h["critical"],
+            high=h["high"],
+            medium=h["medium"],
+            low=h["low"],
+            info=h["info"],
+        )
+        for h in data.get("hosts", [])
+    ]
+    return ScanResult(hosts=hosts, vulnerabilities=vulns)
 
 
 @app.get("/scan_report")
-def get_scan_report_url(req: Request, scan_id: int, format = ExportFormat.pdf) -> str:
+def get_scan_report_url(
+    req: Request, scan_id: int, format: ExportFormat = ExportFormat.pdf
+) -> str:
     return service.get_scan_report_url(
-            scan_id=scan_id,
-            format=format,
-            auth_headers=utils.nessus_auth_header(req.headers),
+        scan_id=scan_id,
+        format=format,
+        auth_headers=utils.nessus_auth_header(req.headers),
     )

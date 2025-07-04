@@ -1,13 +1,20 @@
+from __future__ import annotations
+
+import logging
+import os
 from langchain_google_genai import ChatGoogleGenerativeAI
 from browser_use import Agent, BrowserProfile, BrowserSession
-import os
 
 import conf
 from models import Folder
 
-os.environ["GOOGLE_API_KEY"] = conf.GOOGLE_API_KEY   # langchain_google_genai uses this
+logger = logging.getLogger(__name__)
 
-def build_scan_prompt(target: str, scan_name: str, scan_type: str, folder: Folder) -> str:
+# LangChain-Google setup – keep env var in a single place
+os.environ["GOOGLE_API_KEY"] = conf.GOOGLE_API_KEY
+
+
+def build_scan_prompt(target: str, scan_name: str, scan_type: str, folder: Folder) -> str:  # unchanged
     return f"""
 ──────────────────────────────────────────────────────────────────────────────
 Nessus Essentials one-off “{scan_type}”
@@ -56,29 +63,60 @@ Constraints:
 • Each scan name must be unique (timestamped).
 """
 
-async def scan_operator_run(target: str, scan_type: str, scan_name: str, folder: Folder) -> str:
-    """Start operator to run the specified scan
 
-    Returns:
-        Logs (browser-use repr of AgentHistoryList)
+async def scan_operator_run(
+    target: str,
+    scan_type: str,
+    scan_name: str,
+    folder: Folder,
+) -> str:
+    """
+    Run the browser-automation “operator” that creates & launches a Nessus scan.
+
+    Returns
+    -------
+    str
+        Formatted run-log (repr of AgentHistoryList)
     """
     MAX_STEPS = 25
-    WIDTH, HEIGHT = 1440, 736   # Tested to work: Smaller the better if it still works
+    WIDTH, HEIGHT = 1440, 736
+
+    logger.info(
+        "Launching scan operator | target=%s | type=%s | name=%s | folder_id=%s",
+        target,
+        scan_type,
+        scan_name,
+        folder.id,
+    )
+
     llm = ChatGoogleGenerativeAI(model=conf.LLM_MODEL)
     prompt = build_scan_prompt(target, scan_name, scan_type, folder)
+
     browser_profile = BrowserProfile(
-            headless=conf.IS_HEADLESS,
-            viewport={"width": WIDTH, "height": HEIGHT},
-            window_size={"width": WIDTH, "height": HEIGHT},
-            ignore_https_errors=(not conf.SSL_VERIFY),
-            allowed_domains=[conf.NESSUS_URL],
+        headless=conf.IS_HEADLESS,
+        viewport={"width": WIDTH, "height": HEIGHT},
+        window_size={"width": WIDTH, "height": HEIGHT},
+        ignore_https_errors=not conf.SSL_VERIFY,
+        allowed_domains=[conf.NESSUS_URL],
     )
     browser_session = BrowserSession(browser_profile=browser_profile)
-    agent = Agent(task=prompt,
-                  llm=llm,
-                  enable_memory=False,
-                  browser_session=browser_session,
+    agent = Agent(
+        task=prompt,
+        llm=llm,
+        enable_memory=False,
+        browser_session=browser_session,
     )
-    agent_history = await agent.run(max_steps=MAX_STEPS)
-    return repr(agent_history)
 
+    try:
+        agent_history = await agent.run(max_steps=MAX_STEPS)
+        logger.info("Operator completed successfully: %s", scan_name)
+        return repr(agent_history)
+    except Exception:
+        logger.exception("Operator failed for scan %s", scan_name)
+        raise
+    finally:
+        # Gracefully close the browser even on failure
+        try:
+            await browser_session.close()  # silently ignore if not supported
+        except Exception:
+            logger.warning("Failed to close browser session", exc_info=True)

@@ -1,32 +1,46 @@
+from __future__ import annotations
+
 import datetime as dt
-from shortuuid import uuid
+import logging
 from http.cookies import SimpleCookie
+
+from shortuuid import uuid
 
 import conf
 
-def nessus_auth_header(headers) -> dict:
-    """Extracts Nessus authentication headers if present,
-    else fallback to the default API keys provided in the config file"""
-    headers = dict(headers)
-    keys_lowered = [key.lower() for key in headers]
+logger = logging.getLogger(__name__)
 
-    if "x-apikeys" in keys_lowered:
-        x_apikeys = SimpleCookie()
-        x_apikeys.load(headers["x-apikeys"])
-        if "accessKey" not in x_apikeys or "secretKey" not in x_apikeys:
-            raise Exception("X-ApiKeys Header Malformed (missing accessKey or secretKey)")
-        return {"X-ApiKeys": headers["x-apikeys"]}
 
-    if "x-cookie" in keys_lowered:
-        x_cookie = SimpleCookie()
-        x_cookie.load(headers["x-cookie"])
-        if "token" in x_cookie:
-            return {"X-Cookie": headers["x-cookie"]}
+def nessus_auth_header(headers) -> dict[str, str]:
+    """
+    Resolve Nessus authentication for an incoming request.
 
+    * If caller supplied `X-ApiKeys` or `X-Cookie`, forward it.
+    * Otherwise fall back to configured API keys.
+    """
+    headers_lc = {k.lower(): v for k, v in dict(headers).items()}
+
+    if "x-apikeys" in headers_lc:  # API keys header
+        cookie_val = headers_lc["x-apikeys"]
+        sc = SimpleCookie()
+        sc.load(cookie_val)
+        if "accessKey" not in sc or "secretKey" not in sc:
+            logger.error("Malformed X-ApiKeys header")
+            raise ValueError("X-ApiKeys header malformed")
+        return {"X-ApiKeys": cookie_val}
+
+    if "x-cookie" in headers_lc:  # Nessus session-cookie header
+        cookie_val = headers_lc["x-cookie"]
+        sc = SimpleCookie()
+        sc.load(cookie_val)
+        if "token" in sc:
+            return {"X-Cookie": cookie_val}
+
+    logger.debug("Falling back to config-provided API keys")
     return conf.NESSUS_AUTH_HEADER
 
-def build_scan_name(prefix="") -> str:
-    now = dt.datetime.now().astimezone()
-    unique_suffix = "-" + uuid()
-    return f"{prefix}{now:%y%m%d-%H%M%S{unique_suffix}}"
 
+def build_scan_name(prefix: str = "") -> str:
+    """Timestamp + short-uuid for guaranteed uniqueness (safe for Nessus UI)."""
+    now = dt.datetime.now().astimezone()
+    return f"{prefix}{now:%y%m%d-%H%M%S}-{uuid()}"
