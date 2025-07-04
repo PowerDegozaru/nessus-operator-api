@@ -1,26 +1,24 @@
 /**
- * Vulnerability-related tools for the Nessus MCP server
+ * Vulnerability-related MCP tools
  */
 
 import { getVulnerabilityDetails } from '../nessus-api.js';
-import {
-  validateVulnerabilityId,
-  handleNessusApiError
-} from '../utils/error-handling.js';
+import { handleNessusApiError } from '../utils/error-handling.js';
+import { z } from 'zod';
 
-/**
- * Tool to get vulnerability details
- */
+/* ───────────────────────── schemas ──────────────────────── */
+
+const vulnIdSchema = z.string().min(1);
+
+/* ───────────────────────── get details ───────────────────── */
+
 export const getVulnerabilityDetailsToolSchema = {
   name: 'get_vulnerability_details',
   description: 'Get detailed information about a specific vulnerability',
   inputSchema: {
     type: 'object',
     properties: {
-      vulnerability_id: {
-        type: 'string',
-        description: 'ID of the vulnerability (e.g., CVE-2021-44228)'
-      }
+      vulnerability_id: { type: 'string', description: 'e.g. CVE-2024-12345' }
     },
     required: ['vulnerability_id']
   }
@@ -28,181 +26,62 @@ export const getVulnerabilityDetailsToolSchema = {
 
 export const getVulnerabilityDetailsToolHandler = async (args: Record<string, unknown>) => {
   try {
-    // Validate arguments
-    const vulnId = validateVulnerabilityId(args.vulnerability_id);
-
-    // Get vulnerability details
+    const vulnId  = vulnIdSchema.parse(args.vulnerability_id);
     const details = await getVulnerabilityDetails(vulnId);
-
-    // Check if there was an error
-    if ('error' in details) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${details.error}`
-          }
-        ],
-        isError: true
-      };
-    }
-
-    // Format the vulnerability details
-    const formattedDetails = formatVulnerabilityDetails(details);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: formattedDetails
-        }
-      ]
-    };
-  } catch (error) {
-    const mcpError = handleNessusApiError(error);
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Error: ${mcpError.message}`
-        }
-      ],
-      isError: true
-    };
+    return { content: [{ type: 'text', text: JSON.stringify(details, null, 2) }] };
+  } catch (err) {
+    const mcpErr = handleNessusApiError(err);
+    return { content: [{ type: 'text', text: `Error: ${mcpErr.message}` }], isError: true };
   }
 };
 
-/**
- * Format vulnerability details for better readability
- * @param details Vulnerability details to format
- */
-const formatVulnerabilityDetails = (details: any): string => {
-  if (!details) {
-    return 'No vulnerability details available';
-  }
+/* ───────────────────────── search vulns ──────────────────── */
 
-  let formatted = `# ${details.name} (${details.id})\n\n`;
-
-  // Add severity and CVSS score
-  formatted += `**Severity:** ${details.severity?.toUpperCase() || 'Unknown'}\n`;
-  formatted += `**CVSS Score:** ${details.cvss_score || 'N/A'}\n\n`;
-
-  // Add description
-  if (details.description) {
-    formatted += `## Description\n\n${details.description}\n\n`;
-  }
-
-  // Add affected systems
-  if (details.affected_systems && details.affected_systems.length > 0) {
-    formatted += `## Affected Systems\n\n`;
-    details.affected_systems.forEach((system: string) => {
-      formatted += `- ${system}\n`;
-    });
-    formatted += '\n';
-  }
-
-  // Add remediation
-  if (details.remediation) {
-    formatted += `## Remediation\n\n${details.remediation}\n\n`;
-  }
-
-  // Add references
-  if (details.references && details.references.length > 0) {
-    formatted += `## References\n\n`;
-    details.references.forEach((ref: string) => {
-      formatted += `- ${ref}\n`;
-    });
-    formatted += '\n';
-  }
-
-  return formatted;
-};
-
-/**
- * Tool to search for vulnerabilities by keyword
- */
 export const searchVulnerabilitiesToolSchema = {
   name: 'search_vulnerabilities',
   description: 'Search for vulnerabilities by keyword',
   inputSchema: {
     type: 'object',
-    properties: {
-      keyword: {
-        type: 'string',
-        description: 'Keyword to search for in vulnerability names and descriptions'
-      }
-    },
+    properties: { keyword: { type: 'string', description: 'Search keyword' } },
     required: ['keyword']
   }
 };
 
 export const searchVulnerabilitiesToolHandler = async (args: Record<string, unknown>) => {
   try {
-    // Validate arguments
-    if (!args.keyword || typeof args.keyword !== 'string') {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: 'Error: Keyword is required and must be a string'
-          }
-        ],
-        isError: true
-      };
-    }
+    const keyword = z.string().min(2).parse(args.keyword).toLowerCase();
 
-    const keyword = args.keyword.toLowerCase();
-
-    // Import vulnerabilities from mock-data
     const { vulnerabilities } = await import('../mock-data.js');
-
-    // Search for vulnerabilities matching the keyword
-    const matches = vulnerabilities.filter(vuln =>
-      vuln.name.toLowerCase().includes(keyword) ||
-      vuln.description.toLowerCase().includes(keyword)
+    const matches = vulnerabilities.filter(
+      (v) =>
+        v.name.toLowerCase().includes(keyword) ||
+        v.description.toLowerCase().includes(keyword)
     );
 
     if (matches.length === 0) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `No vulnerabilities found matching "${args.keyword}"`
-          }
-        ]
-      };
+      return { content: [{ type: 'text', text: `No hits for "${keyword}"` }] };
     }
 
-    // Format the search results
-    let results = `# Vulnerability Search Results for "${args.keyword}"\n\n`;
-    results += `Found ${matches.length} matching vulnerabilities:\n\n`;
-
-    matches.forEach((vuln, index) => {
-      results += `## ${index + 1}. ${vuln.name} (${vuln.id})\n\n`;
-      results += `**Severity:** ${vuln.severity.toUpperCase()}\n`;
-      results += `**CVSS Score:** ${vuln.cvss_score}\n\n`;
-      results += `${vuln.description}\n\n`;
-      results += `To get full details, use the \`get_vulnerability_details\` tool with vulnerability_id: ${vuln.id}\n\n`;
-    });
+    const listing = matches
+      .map(
+        (v, i) =>
+          `${i + 1}. ${v.name} (${v.id}) | ${v.severity.toUpperCase()} | CVSS ${v.cvss_score}`
+      )
+      .join('\n');
 
     return {
       content: [
         {
           type: 'text',
-          text: results
+          text:
+            `Found ${matches.length} vulnerabilities for "${keyword}":\n\n` +
+            listing +
+            `\n\nUse "get_vulnerability_details" with the desired id for full info.`
         }
       ]
     };
-  } catch (error) {
-    const mcpError = handleNessusApiError(error);
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Error: ${mcpError.message}`
-        }
-      ],
-      isError: true
-    };
+  } catch (err) {
+    const mcpErr = handleNessusApiError(err);
+    return { content: [{ type: 'text', text: `Error: ${mcpErr.message}` }], isError: true };
   }
 };

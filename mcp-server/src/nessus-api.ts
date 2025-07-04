@@ -1,6 +1,7 @@
 /**
- * Modernised Nessus client – works with the FastAPI back-end in main.py
- * The mock layer is still available by setting useMock = true.
+ * Thin client for our FastAPI Nessus façade.
+ * Automatically adds auth headers and converts FastAPI responses into a
+ * shape expected by the MCP tool-handlers.
  */
 
 import {
@@ -9,22 +10,20 @@ import {
   getMockScanStatus,
   getMockScanResults,
   getMockVulnerabilityDetails,
-  mockScans,
-} from "./mock-data.js";
+  mockScans
+} from './mock-data.js';
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                             */
-/* ------------------------------------------------------------------ */
+/* ─────────────────────── types ─────────────────────── */
 
 export interface NessusConfig {
-  /** Root URL of your FastAPI service, e.g. "http://localhost:8000" */
+  /** Root URL of the FastAPI service */
   baseUrl: string;
-  /** Session token returned by POST /session – set automatically by login() */
+  /** Token returned by POST /session */
   token?: string;
-  /** Optional explicit Nessus X-ApiKeys (rare – normally server default is fine) */
+  /** Optional explicit Nessus API keys – rarely needed */
   accessKey?: string;
   secretKey?: string;
-  /** Skip real HTTP calls and serve data from mock-data.ts */
+  /** If true, bypass HTTP calls and return mock data */
   useMock?: boolean;
 }
 
@@ -33,92 +32,100 @@ export interface LoginOptions {
   password: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Configuration & helpers                                           */
-/* ------------------------------------------------------------------ */
+/** Common structure returned by MCP tool-handlers */
+export interface ApiErrorShape { detail: string }
+
+/* ─────────────────────── errors ─────────────────────── */
+
+export class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/* ───────────────────── configuration ───────────────── */
 
 const defaultConfig: NessusConfig = {
-  baseUrl: "http://localhost:8000", // change to prod URL if needed
-  useMock: true,
+  baseUrl: 'http://localhost:8000',
+  useMock: true
 };
 
 let cfg: NessusConfig = { ...defaultConfig };
 
 export const initializeNessusApi = (userCfg: Partial<NessusConfig> = {}) => {
   cfg = { ...defaultConfig, ...userCfg };
-  console.info(
-    `Nessus API initialised – mode: ${cfg.useMock ? "mock" : "real"} (${
-      cfg.baseUrl
-    })`
-  );
   return cfg;
 };
 
-/** Low-level fetch wrapper that appends token / API-Key headers automatically */
+/* ───────────────────── fetch helper ─────────────────── */
+
 const request = async <T>(
   path: string,
   init: RequestInit = {},
   expectJson = true
 ): Promise<T> => {
   if (cfg.useMock)
-    throw new Error("Real HTTP calls disabled – cfg.useMock === true");
+    throw new Error('Real HTTP calls disabled – cfg.useMock === true');
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(init.headers as Record<string, string>),
+    'Content-Type': 'application/json',
+    ...(init.headers as Record<string, string> | undefined)
   };
 
-  // Authentication – prefer session token, then explicit API keys
+  // Auth – prefer session token
   if (cfg.token) {
-    headers["X-Cookie"] = `token=${cfg.token};`;
+    headers['X-Cookie'] = `token=${cfg.token};`;
   } else if (cfg.accessKey && cfg.secretKey) {
-    headers["X-ApiKeys"] = `accessKey=${cfg.accessKey}; secretKey=${cfg.secretKey};`;
+    headers['X-ApiKeys'] = `accessKey=${cfg.accessKey}; secretKey=${cfg.secretKey};`;
   }
 
-  const res = await fetch(`${cfg.baseUrl}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.baseUrl}${path}`, { ...init, headers });
+  } catch (e) {
+    throw new HttpError(0, `Network error to ${path}: ${(e as Error).message}`);
+  }
+
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(
-      `Request ${init.method ?? "GET"} ${path} failed ${
-        res.status
-      }: ${body.slice(0, 200)}`
-    );
+    throw new HttpError(res.status, body.slice(0, 500));
   }
-  return expectJson ? (res.json() as Promise<T>) : (undefined as unknown as T);
+
+  if (expectJson && res.status !== 204) {
+    return res.json() as Promise<T>;
+  }
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  return undefined as unknown as T;
 };
 
-/* ------------------------------------------------------------------ */
-/*  Public API – the functions your front-end will import             */
-/* ------------------------------------------------------------------ */
+/* ───────────────────── public API ───────────────────── */
 
-/** Authenticate against /session and cache the returned token */
+/** POST /session */
 export const login = async (opts: LoginOptions): Promise<void> => {
-  if (cfg.useMock) return; // no-op in mock mode
-  const token = await request<string>("/session", {
-    method: "POST",
-    body: JSON.stringify(opts),
+  if (cfg.useMock) return;
+  cfg.token = await request<string>('/session', {
+    method: 'POST',
+    body: JSON.stringify(opts)
   });
-  cfg.token = token;
 };
 
 /** GET /list_scan_templates */
 export const getScanTemplates = async () => {
   if (cfg.useMock) return { templates: scanTemplates };
-  return request<{ title: string; uuid: string; desc: string }[]>(
-    "/list_scan_templates"
+
+  const templates = await request<{ title: string; uuid: string; desc: string }[]>(
+    '/list_scan_templates'
   );
+  return { templates };                       // normalise shape
 };
 
-/**
- * POST /start_scan
- * @param target             IP / hostname
- * @param scanType           Template title, e.g. "Basic Network Scan"
- * @param scanNamePrefix     Optional – defaults to "nessus-controller"
- */
+/** POST /start_scan */
 export const startScan = async (
   target: string,
   scanType: string,
-  scanNamePrefix = "nessus-controller"
+  scanNamePrefix = 'nessus-controller'
 ) => {
   if (cfg.useMock) {
     const id = createMockScan(target, scanType);
@@ -129,67 +136,64 @@ export const startScan = async (
     ok: boolean;
     scan_id: number;
     scan_name: string;
-  }>("/start_scan", {
-    method: "POST",
-    body: JSON.stringify({ target, scan_type: scanType, scan_name_prefix: scanNamePrefix }),
+  }>('/start_scan', {
+    method: 'POST',
+    body: JSON.stringify({
+      target,
+      scan_type: scanType,
+      scan_name_prefix: scanNamePrefix
+    })
   });
 };
 
-/** GET /scan_status?scan_id= */
+/** GET /scan_status */
 export const getScanStatus = async (scanId: number | string) => {
   if (cfg.useMock) return getMockScanStatus(String(scanId));
-  return request(`/scan_status?scan_id=${scanId}`);
+  return request(`/scan_status?scan_id=${encodeURIComponent(scanId)}`);
 };
 
-/** GET /scan_results?scan_id= */
+/** GET /scan_results */
 export const getScanResults = async (scanId: number | string) => {
   if (cfg.useMock) return getMockScanResults(String(scanId));
-  return request(`/scan_results?scan_id=${scanId}`);
+  return request(`/scan_results?scan_id=${encodeURIComponent(scanId)}`);
 };
 
-/** GET /list_scans[?folder_id=] */
+/** GET /list_scans */
 export const listScans = async (folderId?: number) => {
   if (cfg.useMock) {
-    const scans = Array.from(mockScans.values()).map((s) => ({
-      id: s.id,
-      target: s.target,
-      type: s.type,
-      status: s.status,
-      created: s.created,
-    }));
-    return { scans };
+    return { scans: Array.from(mockScans.values()) };
   }
-  const qs = folderId ? `?folder_id=${folderId}` : "";
-  return request(`/list_scans${qs}`);
+  const qs = folderId ? `?folder_id=${folderId}` : '';
+  const scans = await request(`/list_scans${qs}`);
+  return { scans };                           // normalise shape
 };
 
-/** GET /folders – added convenience wrapper */
+/** GET /folders */
 export const listFolders = async () => {
-  if (cfg.useMock)
-    throw new Error("Folders not implemented in mock layer yet");
-  return request("/folders");
+  if (cfg.useMock) throw new Error('Folders not mocked');
+  return request('/folders');
 };
 
-/** Create a folder if it does not yet exist (helper around /folders/getid) */
+/** Ensure folder exists, return its numeric id */
 export const ensureFolder = async (name: string): Promise<number> => {
-  if (cfg.useMock) throw new Error("Not supported in mock mode");
+  if (cfg.useMock) throw new Error('ensureFolder not mocked');
   const qs = `?name=${encodeURIComponent(name)}&create_if_not_exists=true`;
   return request<number>(`/folders/getid${qs}`);
 };
 
-/** Optional helper that just pings /list_scan_templates to check health */
+/** Simple health-check helper */
 export const checkApiStatus = async () => {
-  if (cfg.useMock) return { status: "ok", mode: "mock" };
+  if (cfg.useMock) return { status: 'ok', mode: 'mock' };
   try {
     await getScanTemplates();
-    return { status: "ok", mode: "real" };
+    return { status: 'ok', mode: 'real' };
   } catch (e) {
-    return { status: "error", mode: "real", message: (e as Error).message };
+    return { status: 'error', mode: 'real', message: (e as Error).message };
   }
 };
 
-/** placeholder – no FastAPI endpoint yet */
+/** placeholder – server endpoint not implemented */
 export const getVulnerabilityDetails = async (cve: string) => {
   if (cfg.useMock) return getMockVulnerabilityDetails(cve);
-  throw new Error("Endpoint /vulnerability_details not implemented server-side");
+  throw new Error('Endpoint /vulnerability_details not implemented server-side');
 };
