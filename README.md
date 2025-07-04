@@ -13,8 +13,6 @@
 
 ---
 
----
-
 ## Prerequisites – **Read me first 👀**
 
 Before you run either Docker Compose **or** the manual workflow,
@@ -69,7 +67,7 @@ uvicorn main:app --app-dir src --host 127.0.0.1 --port 8000
 ### 2  MCP Server (Node 18+)
 
 ```bash
-cd nessus-mcp-server
+cd mcp-server
 
 # Install JS deps
 npm ci

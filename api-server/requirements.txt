@@ -6,7 +6,6 @@
 # --- FastAPI stack ---------------------------------------------------------
 fastapi==0.115.12
 uvicorn==0.34.3          # ASGI server
-uvloop==0.21.0           # faster event loop (optional)
 starlette==0.46.2        # FastAPI runtime dependency
 anyio==4.9.0             # async lib used by Starlette
 h11==0.16.0              # HTTP/1 parser
