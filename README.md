@@ -13,21 +13,26 @@
 
 ---
 
+---
+
+## Prerequisites – **Read me first 👀**
+
+Before you run either Docker Compose **or** the manual workflow,
+populate a few secrets and connection details.
+
+## Remember to Edit `api-server/config.toml` beforehand
+
 ## Quick start (with Docker Compose)
 
 The **easiest** way to run everything—including the API server, Playwright
 browsers, and the MCP bridge—is the provided Compose file.
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/your-org/genie-cyber-tester-v3-nessus.git
-cd genie-cyber-tester-v3-nessus
-
-# 2. Copy the sample config once
+# 1. Copy the sample config once
 cp api-server/config.example.toml api-server/config.toml
 #    … edit it to match your Nessus instance & API keys …
 
-# 3. Spin it up
+# 2. Spin it up
 docker compose up --build
 ````
 
@@ -51,7 +56,7 @@ cd api-server
 pip install -r requirements.txt
 
 # Copy + edit config
-cp config.example.toml config.toml
+cp config.toml.example config.toml
 vim config.toml   # set Nessus URL, API keys, etc.
 
 # Run with live-reload (dev only)
