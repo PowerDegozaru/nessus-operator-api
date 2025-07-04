@@ -1,42 +1,109 @@
-# Docker Compose
-This docker compose allows for quick deployment of the Nessus MCP server integrated with the custom API.
+````markdown
+## Docker Compose Quick-Start
 
-## Running
-Complete the [Compose Configuration](#config) first.
+This stack spins up **both** the custom API server and the Nessus MCP
+(TypeScript) bridge in one command—ideal for demos or CI pipelines.
 
-`start-mcp-stdio.sh` is a convienient executable to be passed as part of the "command" parameter of the MCP config. It is Bash script tested to work on Linux.
+---
 
-Otherwise, we have to manually run
-```sh
-docker compose up -d
+### 1  Prerequisites
+
+* Docker Engine 20.10+  
+* Docker Compose v2 (comes with Docker Desktop)
+
+---
+
+### 2  Configuration
+
+1. **Copy the sample TOML**
+
+   ```bash
+   cp api-server-config.example.toml api-server-config.toml
+````
+
+2. **Edit the file**
+
+   * Use `https://host.docker.internal:<port>` for `nessus.url` when
+     Nessus is running on **your host machine** (macOS/Windows only).
+   * Make sure `headless_operator = false`—Playwright needs a
+     virtual display inside the container.
+
+3. *(Optional)* open `compose.yaml` and expose the API port if you want
+   to call it from outside the Compose network, e.g.
+
+   ```yaml
+   services:
+     api:
+       ports:
+         - "8000:8000"
+   ```
+
+---
+
+### 3  Running the stack
+
+```bash
+docker compose up -d              # detached
 ```
-and then pass the following as "command" into the MCP config:
-```sh
-docker attach {name of MCP container}
+
+| Action                 | Command                                                       |
+| ---------------------- | ------------------------------------------------------------- |
+| **View logs (follow)** | `docker compose logs -f api`<br/>`docker compose logs -f mcp` |
+| **Stop everything**    | `docker compose down`                                         |
+
+---
+
+### 4  Integrating with Genie MCP
+
+*For automated launches,* point the MCP JSON config’s **`command`**
+argument at the helper script:
+
+```jsonc
+{
+  "command": "bash",
+  "args": ["start-mcp-stdio.sh"],
+  "disabled": false
+}
 ```
-where the container name usually defaults to `nessus-compose-mcp-1` (check `docker ps`).
 
+The script simply `docker attach`es to the running MCP container so that
+STDIO is bridged back to the parent Genie process.
 
-## Config
-`api-server-config.toml` needs to be created, use `https://host.docker.internal:{port}` if the Nessus server is running in your host machine (e.g. in `https://localhost:{port}`).
+**Manual alternative**
 
-The API server will be running in a containerised environment, and by default will not expose any ports to the host machine (you can expose it in the `compose.yaml` file for debugging purposes).
-
-> [!WARNING]
-> `headless_operator` cannot be `true` when running in Docker
-
-
-## Debugging
-It is best to debug the project when running natively (not in Docker), however, we can make use of the docker logging feature to get an idea of what is going on with the servers.
-
-```sh
-docker logs --follow {container name}
+```bash
+docker attach nessus-compose-mcp-1
 ```
-will show a running log of the container.
 
-> The container name should by default be `nessus-compose-api-1` for the API Server and `nessus-compose-mcp-1` for the MCP Server.
-> 
-> Use `docker ps` to check which containers are currently running
+*(Replace the container name if you changed the service name.)*
 
-Though Browser Use can only run headless in Docker, the logs should show the progress of the browser agent for debugging.
+---
 
+### 5  Debugging tips
+
+* **General logs**
+
+  ```bash
+  docker logs --follow nessus-compose-api-1
+  docker logs --follow nessus-compose-mcp-1
+  ```
+
+* **Playwright + headless**
+
+  Even though the browser runs headless in Docker, agent step logs are
+  streamed to `nessus-compose-api-1`; inspect them for selector errors
+  or navigation timeouts.
+
+* **Container names**
+
+  Default pattern is `nessus-compose-<service>-1`.
+  Run `docker ps` to verify.
+
+---
+
+> **Need full-screen Playwright?**
+> Run the stack natively (see manual setup in the main README) where you
+> can launch a headed browser for interactive debugging.
+
+```
+```

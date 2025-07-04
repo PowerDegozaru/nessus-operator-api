@@ -7,7 +7,7 @@ secret_key = "{NESSUS API SECRET KEY}"
 
 [llm]
 google_api_key = "{GOOGLE CLOUD API KEY}"
-model = "gemini-2.5-pro-preview-05-06"
+model = "gemini-2.5-pro"
 
 [dev]
 ssl_verify = true          # Can set to false for development purposes
